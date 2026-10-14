@@ -528,3 +528,7 @@ main.hero{overflow:auto}
 .hl{justify-content:center;gap:var(--s4)}
 .hl .hmain{margin:0}
 @media(max-width:760px){.hl{justify-content:flex-start;gap:var(--s3)}}
+/* host header carries three controls: drop the wordmark text on phones so nothing overflows */
+@media(max-width:480px){body[data-mode=host] .mark span{display:none}}
+.imp summary::before{content:"+ ";font-weight:700}
+.imp[open] summary::before{content:"– "}
