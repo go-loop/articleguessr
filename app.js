@@ -193,7 +193,7 @@ function reveal(s, p) {
 
 async function resultCard(s, p, day, hits) {
   const W = 1080, H = 1350, c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext && c.getContext('2d'); if (!x) return null;
-  const serif = 'Fraunces, Georgia, serif', mono = '"JetBrains Mono", "Courier New", monospace', fg = '#E7EBE5', acc = '#F4D03F', dim = 'rgba(231,235,229,.66)';
+  const serif = '"Times New Roman", Times, serif', mono = '"JetBrains Mono", "Courier New", monospace', fg = '#E7EBE5', acc = '#F4D03F', dim = 'rgba(231,235,229,.66)';
   try { await Promise.all([document.fonts.load('200 120px Fraunces'), document.fonts.load('800 60px Fraunces'), document.fonts.load('400 30px "JetBrains Mono"')]); } catch { /* fall back to system fonts */ }
   x.fillStyle = '#16201C'; x.fillRect(0, 0, W, H);
   const img = await new Promise(res => { const i = new Image(); i.onload = () => res(i); i.onerror = () => res(null); i.src = 'logo-mark-light.svg'; });
