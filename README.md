@@ -14,16 +14,16 @@ hosting worked, what the player still expects, and how to implement a replacemen
 
 | File | Role |
 | --- | --- |
-| `index.html` | The player page. Loads `days.js`, then `app.js`. |
-| `app.js` | The whole player app: routing, play loop, scoring, archive, results/share card, display settings. |
-| `styles.css` | Styles for the player page. |
-| `days.js` | **The hosting seam.** Sets `window.ARTICLEGUESSR_DAYS`, the list of days players can play. Ships empty, so players see built-in demo days. |
+| `index.html` | The player page. Loads `days.js`, `demo.js`, `logic.js`, then `app.js`. |
+| `app.js` | The player UI: routing, play loop, archive, results/share card, display settings, storage. |
+| `logic.js` | Pure rules with no DOM: answer matching (`norm`, `isMatch`, `nearMiss`), date helpers, day validation (`normDay`), the progress hash (`sid`) and the demo schedule (`demoDays`). Unit-tested. |
+| `styles.css` | Styles for the player page. No animations. |
+| `days.js` | **The hosting seam.** Sets `window.ARTICLEGUESSR_DAYS`, the list of days players can play. Ships empty, so players see the built-in demo days. |
+| `demo.js` | The built-in demo bank (`window.ARTICLEGUESSR_BANK`), used only while `days.js` is empty. See "Demo content". |
+| `fonts/` | Self-hosted Fraunces, Bricolage Grotesque and JetBrains Mono (OFL licensed, see `fonts/LICENSES.md`). No third-party requests. |
+| `tests/` | `node --test` unit tests for `logic.js` and the demo bank. |
 | `sw.js`, `manifest.webmanifest`, `icon-*.png`, `logo-mark*.svg` | Make the player page installable and playable offline. |
 | `firebase.json`, `.firebaserc`, `.github/workflows/`, `404.html` | Firebase Hosting deployment (not game hosting). |
-
-Two things in the repo look related but are not wired in: `day.js` (an unreferenced duplicate of `days.js`) and the
-nested `ArticleGuessr/` folder (an older standalone copy of the game with its own separate "Host setup" screen; nothing
-loads it). Neither affects the running game.
 
 ## Adding dates (where to edit)
 
@@ -49,7 +49,7 @@ window.ARTICLEGUESSR_DAYS = [
 Things that trip people up: keep the commas between rounds and between days, put quotes around all text, and use one
 entry per date (if two share a date, the later one wins). A day with a bad date, an empty `article`, or a round with no
 categories is skipped without any error message. Once players have played a date, don't change its rounds, or their
-score for it resets. While the list is empty, players see the built-in demo days.
+score for it resets. While the list is empty, players see the built-in demo days (see "Demo content").
 
 ## Run it locally
 
@@ -58,6 +58,26 @@ Serve the folder (the service worker needs `http://`, not `file://`). Pick one:
 - **VS Code:** *Live Server* extension, right-click `index.html`, *Open with Live Server*.
 - **Python:** `python3 -m http.server 8000`, then open <http://localhost:8000/>.
 - **Node:** `npx serve .`
+
+## Demo content
+
+With `days.js` empty, `demoDays()` (in `logic.js`) cuts the bank in `demo.js` into one five-round game per date, with a
+14-day archive. The bank is read as a ring, five entries per date, so everyone sees the same game on the same date and a
+date's game never changes. Categories in the bank are written in Wikipedia's style but are illustrative; check them
+against the real pages if accuracy matters to you.
+
+When editing `demo.js`, keep at least 70 entries (14 days of 5) and **keep the count off a multiple of 5**, otherwise a
+date's whole game repeats every `length / 5` days. `node --test` checks this, plus: every entry has at least 4 distinct
+categories and a summary, no category contains the answer, and no alias collides with another article's title.
+
+## Tests
+
+```
+node --test
+```
+
+Needs only Node 20 or newer, no install step. It covers answer matching, date handling, day validation, the progress
+hash (asserted identical to the original algorithm, so saved games survive updates) and the demo bank.
 
 ## How hosting used to work
 
@@ -119,25 +139,31 @@ window.ARTICLEGUESSR_DAYS = [
 ];
 ```
 
-**Loading and validation.** `fileDays()` reads the global; `normDay()` coerces each day and **silently drops** any day
-with an invalid date, no rounds, a round with an empty `article`, or a round with no categories. `MAX_ROUNDS` (10)
-caps rounds per day. `allDays()` is the single place the rest of the app gets its days from, sorted newest first, and
-falls back to `demoDays()` when the list is empty.
+**Loading and validation.** `fileDays()` (in `app.js`) reads the global; `normDay()` (in `logic.js`) coerces each day and
+**silently drops** any day with an invalid date, no rounds, a round with an empty `article`, or a round with no
+categories. `MAX_ROUNDS` (10) caps rounds per day. `allDays()` is the single place the rest of the app gets its days
+from, sorted newest first, and falls back to `demoDays()` when the list is empty.
 
-**Which day is active.** `activeDay()` picks the day chosen in the archive (stored under `articleguessr.current.v1`),
-otherwise today's day, otherwise the latest past day. `isOpen()` treats a day as playable once its date is today or
+**Which day is active.** `activeDay()` picks the day chosen in the archive, otherwise today's day, otherwise the latest
+past day. An archive pick is stored under `articleguessr.current.v1` together with the date it was made and only lasts
+for that calendar day, so the app always opens on the new day's game the next morning. `isOpen()` treats a day as playable once its date is today or
 earlier in the player's local time, so future-dated days show as locked.
 
-**Answer checking.** `isMatch()` compares the guess to `article` and each alias after `norm()` (ignores case, accents,
-punctuation, extra spaces and a leading "the"). There is no fuzzy credit. `nearMiss()` only produces a hint.
+**Answer checking.** `isMatch()` (in `logic.js`) compares the guess to the `article`, to the `article` without a trailing
+"(qualifier)" (so `Casablanca (film)` also accepts `Casablanca`), and to each alias, after `norm()`. `norm()` ignores
+case, accents (including letters like `ł`, `ø`, `ß`), apostrophes and periods (`Schindler's List` = `Schindlers List`,
+`D.C.` = `DC`), other punctuation, extra spaces, `&` vs `and`, and a leading "the", "a" or "an". There is no fuzzy
+credit. `nearMiss()` only explains a miss after the answer is revealed and never changes the score.
 
-**Progress is keyed by content.** `dayId()` / `sid()` hash a day's rounds (not its title or date). Progress, best
+**Progress is keyed by content.** `dayId()` / `sid()` (the hash lives in `logic.js`) hash a day's rounds (not its title or date). Progress, best
 scores and play history are stored per hash. **If you edit a published day's rounds, players lose their progress and
-history for it**, because it now looks like a different game. Changing only `title` or `date` is safe.
+history for it**, because it now looks like a different game. Changing only `title` or `date` is safe. A game counts as
+finished once a run of it has been recorded, and replaying it never takes that away (streak and best score are kept).
 
 **Offline cache.** `sw.js` fetches `days.js` network-first (so new days show up as soon as a player is online) and
 serves everything else cache-first. If your hosting serves days from a different URL, add it to the network-first
-branch in `sw.js`, or players will be stuck on stale days. Bump `CACHE` in `sw.js` whenever you change files.
+branch in `sw.js`, or players will be stuck on stale days. `sw.js` pre-caches the files listed in `SHELL`: add any file
+you add to the app, because if one listed file is missing the whole install fails. Bump `CACHE` whenever you change files.
 
 ## Implement your own hosting
 
@@ -162,9 +188,12 @@ Nothing in `app.js` has to change.
 ### Option B: load days from an API
 
 `app.js` reads the global each time it renders, but it starts rendering the moment it loads. So fetch first, then load it.
-In `index.html`, replace the two script tags with:
+In `index.html`, replace the `days.js` and `app.js` script tags (keep `demo.js` and `logic.js`, which `app.js` needs)
+with:
 
 ```html
+<script src="demo.js"></script>
+<script src="logic.js"></script>
 <script>
 fetch('/api/days')
   .then(r => r.json())
@@ -182,7 +211,7 @@ Remember the offline cache: decide what players should see with no connection.
 - **Answers are public.** Every round's `article` and `aliases` are sent to the browser, and `play()` / `isMatch()`
   grade locally. Static hosting cannot hide them. To keep unreleased days secret, only emit days dated today or earlier
   (the old "hold back future days" behaviour), regenerate daily, and accept that today's answers are readable. For real
-  secrecy you must move grading to a server: change the submit handler in `play()`, `reveal()` and `getSetup()` so the
+  secrecy you must move grading to a server: change the submit handler in `play()` (and the reveal that follows it) so the
   answer is only returned after a guess.
 - **Real authentication.** The old passcode was client-side only. If more than one person can publish, or the admin
   page is on the public site, put it behind actual auth (and keep it out of the public deploy folder).
@@ -195,5 +224,5 @@ Remember the offline cache: decide what players should see with no connection.
 ## Deploying
 
 Upload the folder to any static host. The Firebase files in this repo are one example and are independent of game
-hosting. If you serve `days.js` with long cache headers, set it to `no-cache`, and keep `sw.js` uncached too, so new
+hosting. `firebase.json` keeps `tests/` and Markdown files out of the deploy. If you serve `days.js` with long cache headers, set it to `no-cache`, and keep `sw.js` uncached too, so new
 days reach players promptly.
